@@ -1,0 +1,80 @@
+import requests
+import time
+import logging
+
+# === НАСТРОЙКИ ===
+TOKEN = "8009237790:AAEBZUeXJpHVGMU8-OR7bj763a36xdBl3kg"
+CHAT_ID = "700156145"
+CHANGE_THRESHOLD = 15.0
+CHECK_INTERVAL = 60  # интервал проверки в секундах
+
+# === Логи ===
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+def send_message(text):
+    url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
+    try:
+        requests.get(url, params={"chat_id": CHAT_ID, "text": text})
+    except Exception as e:
+        logging.error(f"Ошибка отправки сообщения: {e}")
+
+def get_futures_prices():
+    url = 'https://contract.mexc.com/api/v1/contract/ticker'
+    try:
+        response = requests.get(url)
+        data = response.json().get('data', [])
+        prices = {}
+        for item in data:
+            prices[item['symbol']] = {
+                'lastPrice': float(item['lastPrice']),
+                'volume24': float(item['volume24'])
+            }
+        return prices
+    except Exception as e:
+        logging.error(f"Ошибка получения фьючерсных цен: {e}")
+        return {}
+
+def main():
+    logging.info("Бот запущен. Отслеживаем все монеты на фьючерсах MEXC.")
+    send_message("✅ Бот запущен! Отслеживаем резкие изменения цен и объем торгов за 24ч.")
+
+    last_prices = get_futures_prices()
+    if not last_prices:
+        logging.error("Не удалось получить начальные цены. Завершение.")
+        return
+
+    while True:
+        time.sleep(CHECK_INTERVAL)
+        current_prices = get_futures_prices()
+        if not current_prices:
+            continue
+
+        for symbol, info in current_prices.items():
+            if symbol not in last_prices or last_prices[symbol]['lastPrice'] == 0:
+                last_prices[symbol] = info
+                continue
+
+            change_percent = ((info['lastPrice'] - last_prices[symbol]['lastPrice']) / last_prices[symbol]['lastPrice']) * 100
+
+            if abs(change_percent) >= CHANGE_THRESHOLD:
+                if change_percent > 0:
+                    message = (
+                        f"🚀 ПАМП на {symbol}!\n"
+                        f"Рост: +{change_percent:.2f}%\n"
+                        f"Цена: {info['lastPrice']}\n"
+                        f"Объем за 24ч: {info['volume24']}"
+                    )
+                else:
+                    message = (
+                        f"📉 ДАМП на {symbol}!\n"
+                        f"Падение: {change_percent:.2f}%\n"
+                        f"Цена: {info['lastPrice']}\n"
+                        f"Объем за 24ч: {info['volume24']}"
+                    )
+
+                send_message(message)
+                logging.info(message)
+                last_prices[symbol] = info
+
+if __name__ == "__main__":
+    main()
